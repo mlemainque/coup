@@ -1,16 +1,20 @@
-import pandas as pd
-from matplotlib import pyplot as plt
-from tqdm import trange
-
 from coup.player import *
 
 
 class Game:
     def __init__(self, players, verbose=True):
+        self.middle = MiddleCardSet()
         self.players = players
         self.next_player = players[random.randint(0, len(self.players)-1)] if self.players else None
         self.verbose = verbose
-        self.epochs = 0
+        self.n_epochs = 0
+        self.draw_cards()
+
+    def draw_cards(self):
+        for _ in range(2):
+            for p in self.players:
+                if len(p._cards) < 2:
+                    p.pick_card(self.middle)
 
     def kill(self, player):
         card = player.choose_kill()
@@ -18,11 +22,20 @@ class Game:
             card.dead = True
         if self.verbose: print('%s got killed: %s' % (player, player._cards))
 
-    def epoch(self):
-        if self.winner is not None:
-            return False
+    def __repr__(self):
+        return 'Epoch #%d / %s' % (self.n_epochs, ' / '.join(
+            '%s - %d - %s' % (str(p), p._treasure, ' '.join(map(str, p._cards))) for p in self.players
+        ))
 
-        if self.verbose: print('\n---------\nEpoch #%d - %s / %s / treasure: %d' % (self.epochs, self.next_player, self.next_player._cards, self.next_player.treasure))
+    def epoch(self):
+        assert self.next_player.alive
+        if self.winner is not None:
+            return True
+
+        for p in self.players:
+            p.epoch()
+
+        if self.verbose: print('\n---------\nEpoch #%d - %s / %s / treasure: %d' % (self.n_epochs, self.next_player, self.next_player._cards, self.next_player.treasure))
         action = self.next_player.act()
         assert action.can()
         if self.verbose: print(action)
@@ -70,7 +83,7 @@ class Game:
         if not action.blocked:
             action.do(self)
 
-        self.epochs += 1
+        self.n_epochs += 1
         i = self.players.index(self.next_player)
         next_player = None
         while next_player is None or not next_player.alive:
@@ -78,64 +91,74 @@ class Game:
             next_player = self.players[i]
             if next_player == self.next_player:
                 return False
+        assert next_player.alive
         self.next_player = next_player
         return True
 
+    def epochs(self, n=200):
+        for _ in range(n):
+            if not self.epoch():
+                break
+        return self.winner
+
+    @property
+    def alive_players(self):
+        return [p for p in self.players if p.alive]
+
     @property
     def winner(self):
-        p = [p for p in self.players if p.alive]
-        return p[0] if len(p) == 1 else None
+        return self.alive_players[0] if len(self.alive_players) == 1 else None
+
+    def get_card_set(self, card_set):
+        if isinstance(card_set, MiddleCardSet) or card_set == 'middle':
+            return self.middle
+        if isinstance(card_set, Player):
+            card_set = card_set.nickname
+        if not isinstance(card_set, str):
+            raise TypeError(card_set)
+        return [p for p in self.players if p.nickname == card_set][0]
 
 
 class CoupGame(Game):
 
-    def __init__(self, n_players, verbose=False, true_player=False):
+    def __init__(self, players, verbose=False, true_player=False):
         self.middle = MiddleCardSet()
-        players = [TruePlayer('you', self)] if true_player else []
-        while len(players) < n_players:
-            players.append(DumbPlayer('player%d' % len(players), self))
-        for _ in range(2):
-            for p in players:
-                if len(p._cards) < 2:
-                    p.pick_card(self.middle)
-        super().__init__(players, verbose)
+        if isinstance(players, int): players = ['dumb'] * players
+        players = [PLAYER_TYPE[p]('%s%d' % (p, i+1), self) for i, p in enumerate(players)]
+        super().__init__(players, verbose or true_player)
 
 
 class SimulatedGame(Game):
     __player_class__ = DumbPlayer
 
-    def __init__(self, game, pov_player):
+    def __init__(self, game, pov_player=None):
         self.middle = MiddleCardSet()
-        players = [DumbPlayer(p.nickname, self) for p in game.players]
-        self.pov_player = [p for p in players if p == pov_player][0]
-        for p in players:
-            for c in p._cards:
-                if p == pov_player or c.dead:
-                    p.pick_card(self.middle, c.__nickname__)
-        super().__init__(players, verbose=False)
+        self.players = [DumbPlayer(p.nickname, self) for p in game.players]
+        self.pov_player_nickname = game.pov_player_nickname if isinstance(game, SimulatedGame) else pov_player.nickname
+        for new_player, old_player in zip(self.players, game.players):
+            new_player._treasure = old_player.treasure
+            for c in old_player._cards:
+                if new_player == self.pov_player_nickname or c.dead:
+                    new_player.pick_card(self.middle, c.__nickname__).dead = c.dead
+        self.verbose = False
+        self.next_player = [p for p in self.players if p.nickname == game.next_player.nickname][0]
+        self.n_epochs = game.n_epochs
+        self.draw_cards()
 
-    def clone(self):
-        return self.__class__(self, self.pov_player)
-
-
-if __name__ == '__main__':
-    stats = dict(other_p_lying=[], other_p_accusing=[], p_lying=[], p_accusing=[])
-    Gref = CoupGame(4)
-    GG = SimulatedGame(4)
-    for _ in trange(1000):
-        random.seed()
-        G = GG.clone()
-        for i in range(200):
-            if not G.epoch():
-                break
-        if G.winner is None:
-            continue
-        stats['other_p_lying'].append(np.mean([p.p_lying for p in G.players if p != G.winner]))
-        stats['other_p_accusing'].append(np.mean([p.p_accusing for p in G.players if p != G.winner]))
-        stats['p_lying'].append(G.winner.p_lying)
-        stats['p_accusing'].append(G.winner.p_accusing)
-
-    df = pd.DataFrame(stats)
-    df.plot.scatter('other_p_lying', 'p_accusing')
-    df.plot.scatter('other_p_accusing', 'p_lying')
-    plt.show()
+    def like(self, other):
+        if not isinstance(other, Game):
+            print(other.__class__)
+            print(CoupGame)
+            assert other.__class__ == CoupGame
+            raise TypeError(other)
+        assert len(self.players) == len(other.players)
+        for player, other_player in zip(self.players, other.players):
+            assert player.nickname == other_player.nickname
+            if player.treasure != other_player.treasure: return False
+            if player.alive != other_player.alive: return False
+            assert len(player._cards) == len(other_player._cards)
+            for card, other_card in zip(player._cards, other_player._cards):
+                if card.dead != other_card.dead: return False
+                if player == self.pov_player_nickname or card.dead:
+                    if card.__nickname__ != other_card.__nickname__: return False
+        return True

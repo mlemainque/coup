@@ -31,9 +31,6 @@ class Player(CardSet):
             return
         self._treasure += n
 
-    def has_card(self, C):
-        return [c for c in self._cards if isinstance(c, C) and not c.dead]
-
     @property
     def alive(self):
         return any(not c.dead for c in self._cards)
@@ -75,11 +72,23 @@ class Player(CardSet):
     def choose_look(self):
         raise NotImplementedError
 
-    def __eq__(self, other):
-        return self.nickname == other.nickname
+    def epoch(self):
+        pass
+
+    # def __eq__(self, other):
+    #     if isinstance(other, Player):
+    #         return self.nickname == other.nickname
+    #     elif isinstance(other, str):
+    #         return self.nickname == other
+    #     else:
+    #         raise TypeError(other)
 
 
 class TruePlayer(Player):
+    def __init__(self, nickname=None, game=None):
+        nickname = 'you'
+        super().__init__(nickname, game)
+
     def act(self):
         print('Your turn!')
         print('Your cards: %s' % ' '.join([c.__nickname__.title() for c in self._cards if not c.dead]))
@@ -172,9 +181,36 @@ class DumbPlayer(Player):
 
 
 class SmartPlayer(DumbPlayer):
+    N_SIM = 1000
+
     def __init__(self, nickname=None, game=None):
         super().__init__(nickname, game)
-        self.simulations = SimulatedGame
+        self.simulations = []
+
+    def populate_simulations(self):
+        from coup.game import SimulatedGame
+        while len(self.simulations) < self.N_SIM:
+            self.simulations.append(SimulatedGame(random.choice(self.simulations + [self.game]), self))
 
     def learn_card(self, card, set):
-        super().learn_card(card, set)
+        self.simulations = [g for g in self.simulations if g.get_card_set(set).has_card(card)]
+        self.populate_simulations()
+
+    def epoch(self):
+        self.simulations = [g for g in self.simulations if g.epoch() and g.like(self.game)]
+        print('%d/%d simulations dropped' % (self.N_SIM - len(self.simulations), self.N_SIM))
+        self.populate_simulations()
+
+    def act(self):
+        return super(SmartPlayer, self).act()
+
+        # from coup.game import SimulatedGame
+        # actions = self._possible_actions()
+        # simulations = [SimulatedGame(random.choice(self.simulations), self)]
+
+
+PLAYER_TYPE = dict(
+    dumb=DumbPlayer,
+    true=TruePlayer,
+    smart=SmartPlayer,
+)

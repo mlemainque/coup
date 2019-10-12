@@ -47,9 +47,9 @@ class CardSet:
             other_card = other_set._cards[random.randint(0, len(other_set)-1)]
         elif isinstance(other_card, str):
             other_card = [c for c in other_set._cards if c.__nickname__ == other_card][0]
-        i = other_set._cards.index(other_card)
-        self._cards.append(other_set._cards[i])
+        self._cards.append(other_card)
         other_set._cards.remove(other_card)
+        return other_card
 
     def shuffle(self):
         random.shuffle(self._cards)
@@ -64,6 +64,12 @@ class CardSet:
         cs = self.__class__()
         cs._cards = [c.clone() for c in self._cards]
         return cs
+
+    def has_card(self, C):
+        if isinstance(C, list): C = C[0]
+        if not isinstance(C, str): C = C.__nickname__
+        return [c for c in self._cards if c.__nickname__ == C and not c.dead]
+
 
 
 class MiddleCardSet(CardSet):
