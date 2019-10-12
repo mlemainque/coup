@@ -132,9 +132,9 @@ class MurdererAction(DirectAction):
         return '%s murders %s' % (self.player, self.other)
 
 
-class LadyBlockMurdererAction(BlockAction):
+class CountessBlockMurdererAction(BlockAction):
     __blocked_action__ = MurdererAction
-    __card_category__ = LadyCard
+    __card_category__ = CountessCard
 
 
 class InquisitorMiddleAction(SimpleAction):
@@ -162,6 +162,6 @@ ACTIONS = [
     BankAction, ForeignAction, KillAction,
     DuchessAction, DuchessBlockForeignAction,
     CaptainAction, CaptainBlockCaptainAction, InquisitorBlockCaptainAction,
-    MurdererAction, LadyBlockMurdererAction,
+    MurdererAction, CountessBlockMurdererAction,
     InquisitorMiddleAction, InquisitorPlayerAction,
 ]

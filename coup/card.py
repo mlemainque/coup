@@ -34,8 +34,8 @@ class CaptainCard(Card):
     __nickname__ = 'captain'
 
 
-class LadyCard(Card):
-    __nickname__ = 'lady'
+class CountessCard(Card):
+    __nickname__ = 'countess'
 
 
 class CardSet:
@@ -70,6 +70,6 @@ class MiddleCardSet(CardSet):
     def __init__(self):
         super().__init__()
         self._cards = [card() for card in (
-            DuchessCard, AmbassadorCard, MurdererCard, CaptainCard, LadyCard,
+            DuchessCard, AmbassadorCard, MurdererCard, CaptainCard, CountessCard,
         ) for _ in range(3)]
         self.shuffle()
