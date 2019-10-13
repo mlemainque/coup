@@ -1,6 +1,5 @@
 import numpy as np
-import random
-from coup.card import *
+
 from coup.action import *
 
 
@@ -33,7 +32,7 @@ class Player(CardSet):
 
     @property
     def alive(self):
-        return any(not c.dead for c in self._cards)
+        return any(not c.dead for c in self.cards)
 
     def __str__(self):
         return self.nickname
@@ -44,11 +43,12 @@ class Player(CardSet):
         p._treasure = self._treasure
         return p
 
-    def _possible_actions(self):
-        other_players = [p for p in self.game.players if p.alive and p != self]
-        actions = [A(self, other_player) for A in ACTIONS if not issubclass(A, BlockAction)
-                                         for other_player in (other_players if issubclass(A, DirectAction) else [None])]
-        actions = [a for a in actions if a.can()]
+    def _possible_actions(self, game=None):
+        game = self.game if game is None else game
+        other_players = [p for p in game.players if p.alive and p != self]
+        actions = [A(self) for A in ACTIONS if issubclass(A, SimpleAction)]
+        actions += [A(self, other_player) for A in ACTIONS if issubclass(A, DirectAction) for other_player in other_players]
+        actions = [a for a in actions if a.can(self.game)]
         return actions
 
     def act(self):
@@ -63,8 +63,8 @@ class Player(CardSet):
     def learn_card(self, card, set):
         raise NotImplementedError
 
-    def learn_action(self, action):
-        raise NotImplementedError
+    # def learn_action(self, action):
+    #     raise NotImplementedError
 
     def choose_kill(self):
         raise NotImplementedError
@@ -91,19 +91,19 @@ class TruePlayer(Player):
 
     def act(self):
         print('Your turn!')
-        print('Your cards: %s' % ' '.join([c.__nickname__.title() for c in self._cards if not c.dead]))
+        print('Your cards: %s' % ' '.join([c.__nickname__.title() for c in self.cards if not c.dead]))
         actions = self._possible_actions()
         print('Your possible actions:\n%s' % '\n'.join(' %d: %s' % (i, str(a)) for i, a in enumerate(actions)))
         return actions[int(input('Your choice? '))]
 
     def block(self, action, other):
-        actions = [BA(self, action, other) for BA in ACTIONS if issubclass(BA, BlockAction)]
+        actions = [BA(self, other, action) for BA in ACTIONS if issubclass(BA, BlockAction)]
         actions = [ba for ba in actions if ba.can()]
         if not actions:
             return None
         actions = ['nothing'] + actions
         print('Your turn to block!')
-        print('Your cards: %s' % ' '.join([c.__nickname__.title() for c in self._cards if not c.dead]))
+        print('Your cards: %s' % ' '.join([c.__nickname__.title() for c in self.cards if not c.dead]))
         print('Your possible blocking actions:\n%s' % '\n'.join(' %d: %s' % (i, str(a)) for i, a in enumerate(actions)))
         return actions[int(input('Your choice? '))]
 
@@ -112,12 +112,12 @@ class TruePlayer(Player):
 
     def choose_kill(self):
         print('Your got killed!')
-        cards = [c for c in self._cards if not c.dead]
+        cards = [c for c in self.cards if not c.dead]
         if len(cards) == 1:
             return cards[0]
         elif len(cards) == 0:
             return None
-        print('Your cards:\n%s' % '\n'.join([' %d: %s' % (i, c.__nickname__.title()) for i, c in enumerate(self._cards)]))
+        print('Your cards:\n%s' % '\n'.join([' %d: %s' % (i, c.__nickname__.title()) for i, c in enumerate(self.cards)]))
         return cards[int(input('Your choice? '))]
 
     def learn_card(self, card, set):
@@ -128,10 +128,10 @@ class TruePlayer(Player):
 
     def choose_look(self):
         print('Your got looked!')
-        cards = [c for c in self._cards if not c.dead]
+        cards = [c for c in self.cards if not c.dead]
         if len(cards) == 1:
             return cards[0]
-        print('Your cards:\n%s' % '\n'.join([' %d: %s' % (i, c.__nickname__.title()) for i, c in enumerate(self._cards)]))
+        print('Your cards:\n%s' % '\n'.join([' %d: %s' % (i, c.__nickname__.title()) for i, c in enumerate(self.cards)]))
         return cards[int(input('Your choice? '))]
 
 
@@ -143,7 +143,7 @@ class DumbPlayer(Player):
 
     def choose_kill(self):
         self.shuffle()
-        cards = [c for c in self._cards if not c.dead]
+        cards = [c for c in self.cards if not c.dead]
         return cards[0] if len(cards) else None
 
     def act(self):
@@ -156,7 +156,7 @@ class DumbPlayer(Player):
         return random.random() < self.p_accusing
 
     def block(self, action, other):
-        actions = [BA(self, action, other) for BA in ACTIONS if issubclass(BA, BlockAction)]
+        actions = [BA(self, other, action) for BA in ACTIONS if issubclass(BA, BlockAction)]
         actions = [ba for ba in actions if ba.can()]
         actions = [ba for ba in actions if ba.truly_can() or random.random() > self.p_lying / len(actions)]
         random.shuffle(actions)
@@ -167,7 +167,7 @@ class DumbPlayer(Player):
 
     def choose_look(self):
         self.shuffle()
-        return [c for c in self._cards if not c.dead]
+        return [c for c in self.cards if not c.dead]
 
     def __repr__(self):
         return '%s (%s)' % (
@@ -181,15 +181,15 @@ class DumbPlayer(Player):
 
 
 class SmartPlayer(DumbPlayer):
-    N_SIM = 1000
-
-    def __init__(self, nickname=None, game=None):
+    def __init__(self, nickname=None, game=None, n_simulations=100, n_epochs=2):
         super().__init__(nickname, game)
         self.simulations = []
+        self.n_simulations = n_simulations
+        self.n_epochs = n_epochs
 
     def populate_simulations(self):
         from coup.game import SimulatedGame
-        while len(self.simulations) < self.N_SIM:
+        while len(self.simulations) < self.n_simulations:
             self.simulations.append(SimulatedGame(random.choice(self.simulations + [self.game]), self))
 
     def learn_card(self, card, set):
@@ -198,15 +198,32 @@ class SmartPlayer(DumbPlayer):
 
     def epoch(self):
         self.simulations = [g for g in self.simulations if g.epoch() and g.like(self.game)]
-        print('%d/%d simulations dropped' % (self.N_SIM - len(self.simulations), self.N_SIM))
+        if self.game.verbose: print('%d/%d simulations dropped' % (self.n_simulations - len(self.simulations), self.n_simulations))
         self.populate_simulations()
 
-    def act(self):
-        return super(SmartPlayer, self).act()
+    def score_game(self, game):
+        score = 0
+        score -= sum(10 for c in self.cards if c.dead)
+        score += 3 * len(self._possible_actions(game))
+        if game.alive_players:
+            score += sum(10 for p in game.alive_players if p != self for c in p.cards if c.dead) / len(game.alive_players)
+        if game.winner is not None and game.winner.nickname == self.nickname:
+            score += 100
+        return score
 
-        # from coup.game import SimulatedGame
-        # actions = self._possible_actions()
-        # simulations = [SimulatedGame(random.choice(self.simulations), self)]
+    def act(self):
+        from coup.game import SimulatedGame
+        actions = self._possible_actions()
+        simulations = ((random.choice(actions), SimulatedGame(random.choice(self.simulations), self)) for _ in range(self.n_simulations))
+        simulations = ((action, game.epoch(action)) for action, game in simulations if action.can(game))
+        simulations = ((action, game.epochs(self.n_epochs)) for action, game in simulations)
+        best_action = max(simulations, key=lambda x: self.score_game(x[1]))[0]
+        return best_action
+
+
+class AntiSmartPlayer(SmartPlayer):
+    def score_game(self, game):
+        return - super().score_game(game)
 
 
 PLAYER_TYPE = dict(
